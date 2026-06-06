@@ -9,7 +9,7 @@ build:
 	go build -o dist/$(BINARY) ./cmd/rest-api-fuzzer
 
 run-example:
-	go run ./cmd/rest-api-fuzzer -spec examples/openapi.yaml -base-url http://127.0.0.1:8080 -cases 5 -seed 2026
+	go run ./cmd/rest-api-fuzzer -spec examples/openapi.yaml -base-url http://127.0.0.1:8080 -cases 1 -seed 2026
 
 demo-api:
 	go run ./examples/demo-api

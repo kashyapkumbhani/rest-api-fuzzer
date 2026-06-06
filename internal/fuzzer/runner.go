@@ -24,7 +24,7 @@ func New(spec *openapi.Spec, config Config) *Runner {
 		config.BaseURL = spec.BaseURL
 	}
 	if config.CasesPerOperation == 0 {
-		config.CasesPerOperation = 20
+		config.CasesPerOperation = 1
 	}
 	if config.Timeout == 0 {
 		config.Timeout = 5 * time.Second
@@ -50,28 +50,44 @@ func (r *Runner) Run(ctx context.Context) (report.Report, error) {
 		Seed:       r.config.Seed,
 		StartedAt:  started,
 		Operations: len(ops),
+		Fuzzers:    reportFuzzers(),
 	}
 
 	for _, op := range ops {
-		for i := 0; i < r.config.CasesPerOperation; i++ {
-			select {
-			case <-ctx.Done():
-				return out, ctx.Err()
-			default:
+		for _, strategy := range Strategies() {
+			for i := 0; i < r.config.CasesPerOperation; i++ {
+				select {
+				case <-ctx.Done():
+					return out, ctx.Err()
+				default:
+				}
+				req, err := gen.build(op, i, strategy)
+				if err != nil {
+					out.Findings = append(out.Findings, r.finding("generation_error", op, req, 0, 0, err.Error(), ""))
+					continue
+				}
+				out.Requests++
+				findings := r.execute(op, req)
+				out.Findings = append(out.Findings, findings...)
 			}
-			req, err := gen.build(op, i)
-			if err != nil {
-				out.Findings = append(out.Findings, r.finding("generation_error", op, req, 0, 0, err.Error(), ""))
-				continue
-			}
-			out.Requests++
-			findings := r.execute(op, req)
-			out.Findings = append(out.Findings, findings...)
 		}
 	}
 
 	out.Duration = time.Since(started)
 	return out, nil
+}
+
+func reportFuzzers() []report.Fuzzer {
+	available := Strategies()
+	out := make([]report.Fuzzer, len(available))
+	for i, strategy := range available {
+		out[i] = report.Fuzzer{
+			ID:          strategy.ID,
+			Name:        strategy.Name,
+			Description: strategy.Description,
+		}
+	}
+	return out
 }
 
 func (r *Runner) execute(op operation, generated generatedRequest) []report.Finding {
@@ -148,6 +164,7 @@ func (r *Runner) finding(kind string, op operation, req generatedRequest, status
 		Kind:       kind,
 		Method:     op.Method,
 		Path:       op.Path,
+		Fuzzer:     req.Strategy.ID,
 		StatusCode: status,
 		Duration:   elapsed,
 		Message:    message,

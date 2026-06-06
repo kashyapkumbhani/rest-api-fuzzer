@@ -20,11 +20,12 @@ type operation struct {
 }
 
 type generatedRequest struct {
-	Method  string
-	Path    string
-	URL     string
-	Headers map[string]string
-	Body    []byte
+	Method   string
+	Path     string
+	URL      string
+	Headers  map[string]string
+	Body     []byte
+	Strategy Strategy
 }
 
 type generator struct {
@@ -64,7 +65,7 @@ func collectOperations(doc *openapi3.T) []operation {
 	return operations
 }
 
-func (g *generator) build(op operation, index int) (generatedRequest, error) {
+func (g *generator) build(op operation, index int, strategy Strategy) (generatedRequest, error) {
 	path := op.Path
 	query := make(url.Values)
 	headers := cloneMap(g.headers)
@@ -74,15 +75,25 @@ func (g *generator) build(op operation, index int) (generatedRequest, error) {
 			continue
 		}
 		param := paramRef.Value
-		value := g.valueForSchema(param.Schema, index)
+		value := g.valueForSchema(param.Schema, index, strategy, false)
 		text := scalarToString(value)
+		if strategy.ID == "encoded_slash" && param.In == "path" {
+			text = "segment%2F" + strconv.Itoa(index)
+		}
 		switch param.In {
 		case "path":
 			path = strings.ReplaceAll(path, "{"+param.Name+"}", url.PathEscape(text))
 		case "query":
 			query.Add(param.Name, text)
+			if strategy.ID == "duplicate_query" {
+				query.Add(param.Name, text+"-again")
+			}
 		case "header":
 			headers[param.Name] = text
+			if strategy.ID == "case_flip_header" {
+				delete(headers, param.Name)
+				headers[strings.ToUpper(param.Name)] = text
+			}
 		}
 	}
 
@@ -93,7 +104,7 @@ func (g *generator) build(op operation, index int) (generatedRequest, error) {
 
 	var body []byte
 	if op.Op.RequestBody != nil && op.Op.RequestBody.Value != nil {
-		payload := g.requestBody(op.Op.RequestBody.Value, index)
+		payload := g.requestBody(op.Op.RequestBody.Value, index, strategy)
 		if payload != nil {
 			encoded, err := json.Marshal(payload)
 			if err != nil {
@@ -105,42 +116,50 @@ func (g *generator) build(op operation, index int) (generatedRequest, error) {
 			}
 		}
 	}
+	body = mutateBody(body, headers, strategy)
 
 	return generatedRequest{
-		Method:  op.Method,
-		Path:    op.Path,
-		URL:     u,
-		Headers: headers,
-		Body:    body,
+		Method:   op.Method,
+		Path:     op.Path,
+		URL:      u,
+		Headers:  headers,
+		Body:     body,
+		Strategy: strategy,
 	}, nil
 }
 
-func (g *generator) requestBody(body *openapi3.RequestBody, index int) any {
+func (g *generator) requestBody(body *openapi3.RequestBody, index int, strategy Strategy) any {
 	if body == nil || body.Content == nil {
 		return nil
 	}
 	if mt := body.Content.Get("application/json"); mt != nil {
-		return g.valueForSchema(mt.Schema, index)
+		return g.valueForSchema(mt.Schema, index, strategy, true)
 	}
 	for contentType, mt := range body.Content {
 		if strings.Contains(contentType, "json") && mt != nil {
-			return g.valueForSchema(mt.Schema, index)
+			return g.valueForSchema(mt.Schema, index, strategy, true)
 		}
 	}
 	return nil
 }
 
-func (g *generator) valueForSchema(ref *openapi3.SchemaRef, index int) any {
+func (g *generator) valueForSchema(ref *openapi3.SchemaRef, index int, strategy Strategy, bodyRoot bool) any {
 	if ref == nil || ref.Value == nil {
-		return g.mutatedString(index)
+		return g.mutatedString(index, strategy)
 	}
 	schema := ref.Value
 
 	if len(schema.Enum) > 0 {
+		if strategy.ID == "enum_first" {
+			return schema.Enum[0]
+		}
+		if strategy.ID == "enum_last" {
+			return schema.Enum[len(schema.Enum)-1]
+		}
 		return schema.Enum[g.rand.Intn(len(schema.Enum))]
 	}
 	if schema.Example != nil {
-		return mutateExample(schema.Example, index)
+		return mutateExample(schema.Example, index, strategy)
 	}
 	if schema.Default != nil && index%4 == 0 {
 		return schema.Default
@@ -155,41 +174,67 @@ func (g *generator) valueForSchema(ref *openapi3.SchemaRef, index int) any {
 		}
 		sort.Strings(names)
 		for _, name := range names {
+			if strategy.ID == "required_only" && !contains(schema.Required, name) {
+				continue
+			}
 			child := schema.Properties[name]
-			obj[name] = g.valueForSchema(child, index)
+			obj[name] = g.valueForSchema(child, index, strategy, false)
 		}
 		for _, required := range schema.Required {
 			if _, ok := obj[required]; !ok {
-				obj[required] = g.mutatedString(index)
+				obj[required] = g.mutatedString(index, strategy)
 			}
 		}
 		if len(obj) == 0 && schema.AdditionalProperties.Schema != nil {
-			obj["fuzz"] = g.valueForSchema(schema.AdditionalProperties.Schema, index)
+			obj["fuzz"] = g.valueForSchema(schema.AdditionalProperties.Schema, index, strategy, false)
+		}
+		if strategy.ID == "extra_object_field" && bodyRoot {
+			obj["__unexpected_fuzzer_field"] = "extra-" + strconv.Itoa(index)
+		}
+		if strategy.ID == "large_json_body" && bodyRoot {
+			obj["__large_fuzzer_payload"] = strings.Repeat("z", 4096)
 		}
 		return obj
 	}
 
 	if schema.Type.Permits("array") {
 		count := 1 + g.rand.Intn(3)
+		switch strategy.ID {
+		case "empty_array":
+			count = 0
+		case "single_item_array":
+			count = 1
+		case "large_array":
+			count = 12
+		}
 		items := make([]any, count)
 		for i := range items {
-			items[i] = g.valueForSchema(schema.Items, index+i)
+			items[i] = g.valueForSchema(schema.Items, index+i, strategy, false)
 		}
 		return items
 	}
 	if schema.Type.Permits("integer") {
-		return g.integer(schema, index)
+		return g.integer(schema, index, strategy)
 	}
 	if schema.Type.Permits("number") {
-		return float64(g.integer(schema, index)) + 0.25
+		if strategy.ID == "decimal_precision" {
+			return float64(g.integer(schema, index, strategy)) + 0.123456789
+		}
+		return float64(g.integer(schema, index, strategy)) + 0.25
 	}
 	if schema.Type.Permits("boolean") {
+		if strategy.ID == "boolean_true" {
+			return true
+		}
+		if strategy.ID == "boolean_false" {
+			return false
+		}
 		return index%2 == 0
 	}
-	return g.string(schema, index)
+	return g.string(schema, index, strategy)
 }
 
-func (g *generator) integer(schema *openapi3.Schema, index int) int64 {
+func (g *generator) integer(schema *openapi3.Schema, index int, strategy Strategy) int64 {
 	min := int64(-100)
 	max := int64(100)
 	if schema.Min != nil {
@@ -200,6 +245,18 @@ func (g *generator) integer(schema *openapi3.Schema, index int) int64 {
 	}
 	if max < min {
 		max = min
+	}
+	switch strategy.ID {
+	case "min_boundary":
+		return min
+	case "max_boundary":
+		return max
+	case "zero_value":
+		return 0
+	case "negative_number":
+		return -1
+	case "large_number":
+		return 1_000_000_000
 	}
 	switch index % 5 {
 	case 0:
@@ -213,7 +270,23 @@ func (g *generator) integer(schema *openapi3.Schema, index int) int64 {
 	}
 }
 
-func (g *generator) string(schema *openapi3.Schema, index int) string {
+func (g *generator) string(schema *openapi3.Schema, index int, strategy Strategy) string {
+	switch strategy.ID {
+	case "empty_string":
+		return ""
+	case "long_string":
+		return strings.Repeat("a", 512)
+	case "unicode_string":
+		return "fuzz-こんにちは-مرحبا-" + strconv.Itoa(index)
+	case "sql_probe":
+		return "' OR '1'='1"
+	case "xss_probe":
+		return "<script>alert(1)</script>"
+	case "path_traversal":
+		return "../etc/passwd"
+	case "nullish_string":
+		return "null"
+	}
 	if schema.Pattern != "" && index%3 == 0 {
 		return "pattern-" + strconv.Itoa(index)
 	}
@@ -229,10 +302,26 @@ func (g *generator) string(schema *openapi3.Schema, index int) string {
 	if schema.Format == "date-time" {
 		return "2026-06-06T00:00:00Z"
 	}
-	return g.mutatedString(index)
+	return g.mutatedString(index, strategy)
 }
 
-func (g *generator) mutatedString(index int) string {
+func (g *generator) mutatedString(index int, strategy Strategy) string {
+	switch strategy.ID {
+	case "empty_string":
+		return ""
+	case "long_string":
+		return strings.Repeat("a", 512)
+	case "unicode_string":
+		return "fuzz-こんにちは-مرحبا-" + strconv.Itoa(index)
+	case "sql_probe":
+		return "' OR '1'='1"
+	case "xss_probe":
+		return "<script>alert(1)</script>"
+	case "path_traversal":
+		return "../etc/passwd"
+	case "nullish_string":
+		return "null"
+	}
 	candidates := []string{
 		"fuzz",
 		"Fuzz Case " + strconv.Itoa(index),
@@ -256,10 +345,10 @@ func scalarToString(value any) string {
 	}
 }
 
-func mutateExample(value any, index int) any {
+func mutateExample(value any, index int, strategy Strategy) any {
 	switch typed := value.(type) {
 	case string:
-		if index%3 == 0 {
+		if strategy.ID != "valid_baseline" || index%3 == 0 {
 			return typed + "-fuzz"
 		}
 		return typed
@@ -272,12 +361,37 @@ func mutateExample(value any, index int) any {
 	case map[string]any:
 		next := make(map[string]any, len(typed))
 		for key, child := range typed {
-			next[key] = mutateExample(child, index)
+			next[key] = mutateExample(child, index, strategy)
 		}
 		return next
 	default:
 		return value
 	}
+}
+
+func mutateBody(body []byte, headers map[string]string, strategy Strategy) []byte {
+	switch strategy.ID {
+	case "missing_content_type":
+		delete(headers, "Content-Type")
+	case "invalid_json_body":
+		if len(body) > 0 {
+			return []byte(`{"fuzzer":`)
+		}
+	case "empty_json_body":
+		if len(body) > 0 {
+			return []byte(`{}`)
+		}
+	}
+	return body
+}
+
+func contains(values []string, needle string) bool {
+	for _, value := range values {
+		if value == needle {
+			return true
+		}
+	}
+	return false
 }
 
 func cloneMap(source map[string]string) map[string]string {

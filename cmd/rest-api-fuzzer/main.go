@@ -17,17 +17,26 @@ func main() {
 	var cfg fuzzer.Config
 	var specPath string
 	var format string
+	var listFuzzers bool
 	var headerList multiFlag
 
 	flag.StringVar(&specPath, "spec", "", "Path or URL to an OpenAPI 3.x document")
 	flag.StringVar(&cfg.BaseURL, "base-url", "", "Override the server URL from the OpenAPI document")
 	flag.Int64Var(&cfg.Seed, "seed", 1337, "Deterministic random seed")
-	flag.IntVar(&cfg.CasesPerOperation, "cases", 20, "Number of generated requests per operation")
+	flag.IntVar(&cfg.CasesPerOperation, "cases", 1, "Number of generated requests per operation per built-in fuzzer")
 	flag.DurationVar(&cfg.Timeout, "timeout", 5*time.Second, "Per-request timeout")
 	flag.DurationVar(&cfg.SlowThreshold, "slow", 750*time.Millisecond, "Report responses slower than this threshold")
 	flag.StringVar(&format, "format", "text", "Report format: text or json")
+	flag.BoolVar(&listFuzzers, "list-fuzzers", false, "List built-in fuzzing strategies and exit")
 	flag.Var(&headerList, "header", "Static header to include, e.g. 'Authorization: Bearer token'")
 	flag.Parse()
+
+	if listFuzzers {
+		for _, strategy := range fuzzer.Strategies() {
+			fmt.Printf("%-22s %s\n", strategy.ID, strategy.Description)
+		}
+		return
+	}
 
 	if specPath == "" {
 		fmt.Fprintln(os.Stderr, "missing required -spec")

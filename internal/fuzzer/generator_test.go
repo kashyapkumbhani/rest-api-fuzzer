@@ -15,13 +15,14 @@ func TestGeneratorIsDeterministicForSameSeed(t *testing.T) {
 
 	left := newGenerator(42, "https://api.example.com", map[string]string{"X-Test": "yes"})
 	right := newGenerator(42, "https://api.example.com", map[string]string{"X-Test": "yes"})
+	strategy := Strategy{ID: "long_string", Name: "Long string"}
 
 	for i := 0; i < 10; i++ {
-		a, err := left.build(ops[0], i)
+		a, err := left.build(ops[0], i, strategy)
 		if err != nil {
 			t.Fatalf("left build: %v", err)
 		}
-		b, err := right.build(ops[0], i)
+		b, err := right.build(ops[0], i, strategy)
 		if err != nil {
 			t.Fatalf("right build: %v", err)
 		}
@@ -36,7 +37,7 @@ func TestGeneratorBuildsPathQueryHeadersAndJSONBody(t *testing.T) {
 	op := collectOperations(doc)[0]
 	gen := newGenerator(7, "https://api.example.com/v1", map[string]string{"Authorization": "Bearer test"})
 
-	req, err := gen.build(op, 1)
+	req, err := gen.build(op, 1, Strategy{ID: "valid_baseline", Name: "Valid baseline"})
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -55,6 +56,23 @@ func TestGeneratorBuildsPathQueryHeadersAndJSONBody(t *testing.T) {
 	}
 	if len(req.Body) == 0 {
 		t.Fatal("expected JSON body")
+	}
+}
+
+func TestStrategiesExposeLongPublicFuzzerList(t *testing.T) {
+	got := Strategies()
+	if len(got) < 25 {
+		t.Fatalf("expected at least 25 fuzzing strategies, got %d", len(got))
+	}
+	seen := make(map[string]bool, len(got))
+	for _, strategy := range got {
+		if strategy.ID == "" || strategy.Name == "" || strategy.Description == "" {
+			t.Fatalf("strategy should be fully documented: %#v", strategy)
+		}
+		if seen[strategy.ID] {
+			t.Fatalf("duplicate strategy id %q", strategy.ID)
+		}
+		seen[strategy.ID] = true
 	}
 }
 

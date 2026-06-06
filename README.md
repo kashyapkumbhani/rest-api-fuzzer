@@ -33,6 +33,7 @@ Same seed, same requests. That makes failures easy to replay and fix.
 - Mutation strings for empty values, long values, traversal, SQL-ish payloads, and script payloads
 - Response validation against documented JSON schemas
 - Text and JSON reports
+- Built-in `-list-fuzzers` command
 - Non-zero exit on server errors, schema violations, and request errors
 - Small codebase that is easy to audit and extend
 
@@ -64,7 +65,7 @@ Override the target server:
 rest-api-fuzzer \
   -spec ./openapi.yaml \
   -base-url http://127.0.0.1:8080 \
-  -cases 25 \
+  -cases 2 \
   -seed 2026
 ```
 
@@ -99,7 +100,7 @@ Terminal 2:
 go run ./cmd/rest-api-fuzzer \
   -spec examples/openapi.yaml \
   -base-url http://127.0.0.1:8080 \
-  -cases 8 \
+  -cases 1 \
   -seed 2026
 ```
 
@@ -111,16 +112,17 @@ The demo API intentionally returns a `500` for one mutated product name and retu
 REST API Fuzzer report
 Seed: 2026
 Operations: 12
-Requests: 240
+Requests: 360
+Fuzzers: 30
 Duration: 3.184s
 Findings: 2
 
-[server_error] POST /products -> HTTP 500 in 18ms
+[server_error] POST /products via sql_probe -> HTTP 500 in 18ms
   endpoint returned a 5xx response
   http://127.0.0.1:8080/products
   body: {"name":"' OR '1'='1","price":0.25}
 
-[schema_violation] GET /products/{id} -> HTTP 200 in 7ms
+[schema_violation] GET /products/{id} via valid_baseline -> HTTP 200 in 7ms
   value must be a string
   http://127.0.0.1:8080/products/00000000-0000-4000-8000-000000000001
 ```
@@ -132,11 +134,55 @@ Findings: 2
 | `-spec` | required | Path or URL to an OpenAPI 3.x document |
 | `-base-url` | first OpenAPI server | Override target server |
 | `-seed` | `1337` | Deterministic generation seed |
-| `-cases` | `20` | Requests per operation |
+| `-cases` | `1` | Requests per operation per built-in fuzzer |
 | `-timeout` | `5s` | Per-request timeout |
 | `-slow` | `750ms` | Report responses slower than this |
 | `-header` | none | Static header, repeatable |
 | `-format` | `text` | `text` or `json` |
+| `-list-fuzzers` | `false` | Print built-in fuzzers and exit |
+
+## Built-in Fuzzers
+
+Run this to print the live list:
+
+```bash
+rest-api-fuzzer -list-fuzzers
+```
+
+Current built-ins:
+
+| Fuzzer | Behavior |
+| --- | --- |
+| `valid_baseline` | Schema-valid control requests |
+| `min_boundary` | Minimum numeric boundaries |
+| `max_boundary` | Maximum numeric boundaries |
+| `zero_value` | Zero-like scalar values |
+| `negative_number` | Negative numeric probes |
+| `large_number` | Large numeric probes |
+| `decimal_precision` | High-precision decimal probes |
+| `empty_string` | Empty string probes |
+| `long_string` | Long deterministic string probes |
+| `unicode_string` | Unicode/encoding probes |
+| `sql_probe` | SQL-shaped string probes |
+| `xss_probe` | Script-shaped string probes |
+| `path_traversal` | Traversal-shaped string probes |
+| `nullish_string` | Null-like string probes |
+| `boolean_true` | Forced true booleans |
+| `boolean_false` | Forced false booleans |
+| `enum_first` | First enum value |
+| `enum_last` | Last enum value |
+| `required_only` | Required JSON fields only |
+| `extra_object_field` | Unexpected JSON object properties |
+| `empty_array` | Empty arrays |
+| `single_item_array` | One-item arrays |
+| `large_array` | Larger arrays |
+| `duplicate_query` | Duplicate query parameters |
+| `encoded_slash` | Encoded slash-like path values |
+| `missing_content_type` | JSON body without content type |
+| `invalid_json_body` | Malformed JSON body |
+| `empty_json_body` | Empty JSON object body |
+| `large_json_body` | Large JSON payload field |
+| `case_flip_header` | Upper-case generated header names |
 
 ## What Gets Generated
 

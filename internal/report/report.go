@@ -13,13 +13,21 @@ type Report struct {
 	Duration   time.Duration `json:"duration"`
 	Operations int           `json:"operations"`
 	Requests   int           `json:"requests"`
+	Fuzzers    []Fuzzer      `json:"fuzzers"`
 	Findings   []Finding     `json:"findings"`
+}
+
+type Fuzzer struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
 }
 
 type Finding struct {
 	Kind       string        `json:"kind"`
 	Method     string        `json:"method"`
 	Path       string        `json:"path"`
+	Fuzzer     string        `json:"fuzzer,omitempty"`
 	StatusCode int           `json:"status_code,omitempty"`
 	Duration   time.Duration `json:"duration"`
 	Message    string        `json:"message"`
@@ -48,6 +56,7 @@ func (r Report) Text() string {
 	fmt.Fprintf(&b, "Seed: %d\n", r.Seed)
 	fmt.Fprintf(&b, "Operations: %d\n", r.Operations)
 	fmt.Fprintf(&b, "Requests: %d\n", r.Requests)
+	fmt.Fprintf(&b, "Fuzzers: %d\n", len(r.Fuzzers))
 	fmt.Fprintf(&b, "Duration: %s\n", r.Duration.Truncate(time.Millisecond))
 	fmt.Fprintf(&b, "Findings: %d\n\n", len(r.Findings))
 
@@ -68,6 +77,9 @@ func (r Report) Text() string {
 
 	for _, finding := range r.Findings {
 		fmt.Fprintf(&b, "[%s] %s %s", finding.Kind, finding.Method, finding.Path)
+		if finding.Fuzzer != "" {
+			fmt.Fprintf(&b, " via %s", finding.Fuzzer)
+		}
 		if finding.StatusCode != 0 {
 			fmt.Fprintf(&b, " -> HTTP %d", finding.StatusCode)
 		}
