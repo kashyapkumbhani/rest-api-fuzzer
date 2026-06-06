@@ -2,6 +2,7 @@ package fuzzer
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -104,8 +105,10 @@ func (r *Runner) execute(op operation, generated generatedRequest) []report.Find
 	if elapsed >= r.config.SlowThreshold {
 		findings = append(findings, r.finding("slow_response", op, generated, status, elapsed, fmt.Sprintf("response exceeded %s", r.config.SlowThreshold), body))
 	}
-	if violation := r.responseViolation(op.Op, status, resp); violation != "" {
-		findings = append(findings, r.finding("schema_violation", op, generated, status, elapsed, violation, body))
+	if status < 500 {
+		if violation := r.responseViolation(op.Op, status, resp); violation != "" {
+			findings = append(findings, r.finding("schema_violation", op, generated, status, elapsed, violation, body))
+		}
 	}
 	return findings
 }
@@ -128,7 +131,11 @@ func (r *Runner) responseViolation(op *openapi3.Operation, status int, resp *fas
 		if mt == nil || mt.Schema == nil {
 			return "JSON response is missing an application/json schema"
 		}
-		err := mt.Schema.Value.VisitJSON(resp.Body(), openapi3.MultiErrors())
+		var value any
+		if err := json.Unmarshal(resp.Body(), &value); err != nil {
+			return fmt.Sprintf("response is not valid JSON: %v", err)
+		}
+		err := mt.Schema.Value.VisitJSON(value, openapi3.MultiErrors())
 		if err != nil {
 			return err.Error()
 		}

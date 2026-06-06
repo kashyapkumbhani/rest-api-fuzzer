@@ -83,6 +83,28 @@ Emit JSON for CI or later analysis:
 rest-api-fuzzer -spec ./openapi.yaml -format json > fuzz-report.json
 ```
 
+## Local Demo
+
+This repository includes a tiny intentionally-buggy API so you can see findings immediately.
+
+Terminal 1:
+
+```bash
+go run ./examples/demo-api
+```
+
+Terminal 2:
+
+```bash
+go run ./cmd/rest-api-fuzzer \
+  -spec examples/openapi.yaml \
+  -base-url http://127.0.0.1:8080 \
+  -cases 8 \
+  -seed 2026
+```
+
+The demo API intentionally returns a `500` for one mutated product name and returns a schema-invalid `price` from `GET /products/{id}`.
+
 ## Example Output
 
 ```text

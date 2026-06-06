@@ -1,6 +1,6 @@
 BINARY := rest-api-fuzzer
 
-.PHONY: test build run-example clean
+.PHONY: test build run-example demo-api clean
 
 test:
 	go test ./...
@@ -10,6 +10,9 @@ build:
 
 run-example:
 	go run ./cmd/rest-api-fuzzer -spec examples/openapi.yaml -base-url http://127.0.0.1:8080 -cases 5 -seed 2026
+
+demo-api:
+	go run ./examples/demo-api
 
 clean:
 	rm -rf dist coverage.out
