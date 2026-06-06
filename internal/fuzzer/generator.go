@@ -6,6 +6,7 @@ import (
 	"math"
 	"math/rand"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -54,6 +55,12 @@ func collectOperations(doc *openapi3.T) []operation {
 			})
 		}
 	}
+	sort.Slice(operations, func(i, j int) bool {
+		if operations[i].Path != operations[j].Path {
+			return operations[i].Path < operations[j].Path
+		}
+		return operations[i].Method < operations[j].Method
+	})
 	return operations
 }
 
@@ -142,7 +149,13 @@ func (g *generator) valueForSchema(ref *openapi3.SchemaRef, index int) any {
 	switch schema.Type.Permits("object") {
 	case true:
 		obj := make(map[string]any)
-		for name, child := range schema.Properties {
+		names := make([]string, 0, len(schema.Properties))
+		for name := range schema.Properties {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			child := schema.Properties[name]
 			obj[name] = g.valueForSchema(child, index)
 		}
 		for _, required := range schema.Required {
