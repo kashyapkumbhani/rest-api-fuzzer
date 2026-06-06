@@ -1,0 +1,90 @@
+openapi: 3.0.3
+info:
+  title: Demo Inventory API
+  version: 1.0.0
+  description: Small OpenAPI document used by the REST API Fuzzer examples.
+servers:
+  - url: http://127.0.0.1:8080
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      responses:
+        "200":
+          description: service status
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [ok]
+  /products:
+    post:
+      operationId: createProduct
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, price]
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                price:
+                  type: number
+                  minimum: 0
+                tags:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        "201":
+          description: created product
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, name, price]
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  name:
+                    type: string
+                  price:
+                    type: number
+        "400":
+          description: validation error
+  /products/{id}:
+    get:
+      operationId: getProduct
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: product
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, name, price]
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  name:
+                    type: string
+                  price:
+                    type: number
+        "404":
+          description: not found
