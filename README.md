@@ -176,6 +176,8 @@ make build
 
 The example spec lives at [examples/openapi.yaml](examples/openapi.yaml).
 
+More command examples are in [docs/USAGE.md](docs/USAGE.md).
+
 ## Design
 
 The codebase is intentionally small:
